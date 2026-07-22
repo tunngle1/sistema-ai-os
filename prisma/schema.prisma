@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id        String   @id @default("SYSTEM_GAME")
+  name      String
+  truthJson String
+  createdAt DateTime @default(now())
+}
+
+model Leader {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  role        String   @default("leader")
+  photoUrl    String?
+  description String?
+  telegram    String?
+  vk          String?
+  youtube     String?
+  instagram   String?
+  createdAt   DateTime @default(now())
+  games       Game[]
+}
+
+model Game {
+  id              String   @id
+  slug            String   @unique
+  title           String   @default("Игра «Система»")
+  date            DateTime
+  time            String
+  city            String
+  address         String
+  price           Int
+  seatsTotal      Int
+  seatsTaken      Int      @default(0)
+  leaderName      String
+  leaderPhoto     String?
+  leaderBio       String?
+  telegram        String?
+  vk              String?
+  youtube         String?
+  instagram       String?
+  status          String   @default("draft")
+  productId       String   @default("SYSTEM_GAME")
+  approvalMode    String   @default("C")
+  budget          Int?
+  targetAttended  Int      @default(60)
+  leaderId        String
+  leader          Leader   @relation(fields: [leaderId], references: [id])
+  createdAt       DateTime @default(now())
+  launchedAt      DateTime?
+  campaign        Campaign?
+  contentItems    ContentItem[]
+  leads           Lead[]
+  agentRuns       AgentRun[]
+  claims          Claim[]
+  analyticsEvents AnalyticsEvent[]
+  auditEvents     AuditEvent[]
+}
+
+model Campaign {
+  id              String    @id @default(cuid())
+  gameId          String    @unique
+  game            Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  productId       String    @default("SYSTEM_GAME")
+  strategy        String
+  daysLeft        Int
+  goalSeats       Int
+  accents         String
+  metrics         String
+  approvalMode    String    @default("C")
+  budget          Int?
+  enrollmentStart DateTime?
+  enrollmentEnd   DateTime?
+  trafficPlan     String    @default("{}")
+  researchPlan    String    @default("{}")
+  dailyReport     String?
+  createdAt       DateTime  @default(now())
+  claims          Claim[]
+}
+
+model Claim {
+  id                 String    @id @default(cuid())
+  campaignId         String?
+  campaign           Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  gameId             String
+  game               Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  claimText          String
+  claimType          String
+  sourceId           String?
+  confidenceScore    Float     @default(0.5)
+  verificationStatus String    @default("pending")
+  allowedFormats     String    @default("[]")
+  createdAt          DateTime  @default(now())
+}
+
+model ContentItem {
+  id            String    @id @default(cuid())
+  gameId        String
+  game          Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  contentId     String?
+  platform      String
+  formatType    String    @default("post")
+  topic         String
+  hook          String
+  cta           String
+  shootBrief    String    @default("")
+  script        String    @default("")
+  postText      String    @default("")
+  landingUrl    String
+  utm           String
+  claimIds      String    @default("[]")
+  customerStage String?
+  approvalMode  String    @default("C")
+  scheduledAt   DateTime
+  status        String    @default("GENERATED")
+  blockReason   String?
+  reach         Int       @default(0)
+  views         Int       @default(0)
+  clicks        Int       @default(0)
+  ctr           Float     @default(0)
+  approvedAt    DateTime?
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model Lead {
+  id                String    @id @default(cuid())
+  gameId            String
+  game              Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  name              String
+  phone             String
+  email             String?
+  source            String    @default("landing")
+  platform          String?
+  utm               String?
+  stage             String    @default("NEW")
+  interest          String?
+  objections        String?
+  diagnosticAnswers String?
+  purchaseScore     Int       @default(10)
+  nextAction        String?
+  handedToLeader    Boolean   @default(false)
+  paid              Boolean   @default(false)
+  qualifiedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  messages          Message[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model AgentRun {
+  id        String   @id @default(cuid())
+  gameId    String
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  agent     String
+  source    String
+  input     String?
+  output    String?
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  gameId    String
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  eventType String
+  leadId    String?
+  contentId String?
+  payload   String?
+  createdAt DateTime @default(now())
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  gameId    String?
+  game      Game?    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  actor     String
+  action    String
+  reason    String?
+  payload   String?
+  createdAt DateTime @default(now())
+}
+
+model ModelCall {
+  id        String   @id @default(cuid())
+  gameId    String?
+  agent     String
+  model     String   @default("qwen3.7-plus")
+  tokensIn  Int?
+  tokensOut Int?
+  latencyMs Int?
+  createdAt DateTime @default(now())
+}
