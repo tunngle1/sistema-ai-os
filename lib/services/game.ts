@@ -87,7 +87,10 @@ export async function getGameDashboard(gameId: string) {
     where: { id: gameId },
     include: {
       campaign: true,
-      contentItems: { orderBy: { scheduledAt: "asc" } },
+      contentItems: {
+        orderBy: { scheduledAt: "asc" },
+        include: { sourceUnit: true },
+      },
       leads: {
         include: { messages: { orderBy: { createdAt: "asc" } } },
         orderBy: { createdAt: "desc" },

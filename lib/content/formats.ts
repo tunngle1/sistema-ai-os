@@ -1,12 +1,17 @@
-export type ContentFormat = "short" | "video" | "post" | "story" | "article";
+import { UNIT_TYPE_LABELS, type ContentUnitType } from "@/lib/content-factory/types";
+
+export type ContentFormat = "short" | "video" | "post" | "story" | "article" | "carousel";
 
 export const FORMAT_LABELS: Record<ContentFormat, string> = {
   short: "Short / Reels (15–60 сек)",
   video: "Длинное видео (3–10 мин)",
   post: "Текстовый пост",
   story: "Stories",
-  article: "Статья",
+  article: "Статья / Email",
+  carousel: "Карусель",
 };
+
+export { UNIT_TYPE_LABELS };
 
 export function formatForPlatform(platform: string): ContentFormat {
   const p = platform.toLowerCase();
@@ -29,10 +34,11 @@ export const STATUS_LABELS: Record<string, string> = {
   FAILED: "Ошибка",
   BLOCKED: "Заблокировано",
   ARCHIVED: "Архив",
-  ready: "Готово к съёмке",
-  scheduled: "Запланировано",
-  published: "Опубликовано",
 };
+
+export function unitTypeLabel(unitType: string) {
+  return UNIT_TYPE_LABELS[unitType as ContentUnitType] ?? unitType;
+}
 
 export function buildFallbackBrief(params: {
   platform: string;
@@ -54,17 +60,15 @@ export function buildFallbackBrief(params: {
 
   const shootBrief =
     formatType === "short"
-      ? `Снимите вертикальное видео 15–45 сек. В кадре — вы (${params.game.leaderName}). Начните с хука, в середине — суть темы «${params.topic}», в конце — призыв.`
+      ? `Снимите вертикальное видео 9:16, 20–90 сек. Safe zones для титров. ${params.game.leaderName} в кадре или B-roll.`
       : formatType === "video"
-        ? `Запишите горизонтальное видео 3–7 мин: представьтесь, раскройте тему «${params.topic}», расскажите что такое игра «Система», в конце — дата и CTA.`
-        : `Подготовьте текстовый пост для ${params.platform}: заголовок-хук, 2–3 абзаца по теме, блок с датой игры и ссылкой.`;
+        ? `Запишите горизонтальное видео 16:9, 5–8 мин по теме «${params.topic}».`
+        : `Подготовьте адаптированный текст для ${params.platform}.`;
 
   const script = [
     `Хук: ${params.hook}`,
     `Тема: ${params.topic}`,
-    `Раскройте: чем игра «Система» помогает получить ясность за один вечер.`,
-    `Факты: ${params.game.city}, ${dateStr}, ${params.game.time}. Осталось ${params.game.seatsLeft} мест. Цена ${params.game.price.toLocaleString("ru-RU")} ₽.`,
-    `Завершение: ${params.cta}.`,
+    `CTA: ${params.cta}`,
   ].join("\n");
 
   const postText = [
@@ -72,11 +76,8 @@ export function buildFallbackBrief(params: {
     "",
     params.topic,
     "",
-    `🎲 Игра «Система» · ${params.game.city}`,
-    `📅 ${dateStr}, ${params.game.time}`,
-    `💰 ${params.game.price.toLocaleString("ru-RU")} ₽ · осталось ${params.game.seatsLeft} мест`,
-    "",
-    `${params.cta} 👇`,
+    `🎲 ${params.game.city} · ${dateStr}`,
+    params.cta,
     params.landingPath,
   ].join("\n");
 

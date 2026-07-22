@@ -1,8 +1,7 @@
 import { prisma } from "@/lib/db";
 import { runCampaignAgent } from "@/lib/ai/agents/campaign-agent";
-import { runContentAgent } from "@/lib/ai/agents/content-agent";
-import { runDistributionAgent } from "@/lib/ai/agents/distribution-agent";
 import { logAgentAction } from "@/lib/ai/agents/base";
+import { runContentFactory } from "@/lib/content-factory";
 import {
   runAnalystAgent,
   runCriticAgent,
@@ -54,12 +53,6 @@ function toGameContext(game: {
     approvalMode: game.approvalMode,
     budget: game.budget,
   };
-}
-
-function initialContentStatus(approvalMode: string) {
-  if (approvalMode === "A") return "SCHEDULED";
-  if (approvalMode === "B") return "HUMAN_REVIEW";
-  return "HUMAN_REVIEW";
 }
 
 export async function launchGameAgents(gameId: string) {
@@ -127,13 +120,27 @@ export async function launchGameAgents(gameId: string) {
   await runKnowledgeBuilderAgent(ctx, claims.length);
   await runVerifierAgent(ctx, claims.filter((c) => c.verificationStatus === "verified").length);
 
-  const contentPlan = await runContentAgent(ctx, campaignData);
-  await logAgentAction(gameId, "content_editor", "ai", `Сгенерировано ${contentPlan.items.length} единиц контента`);
+  const verifiedClaimIds = claims
+    .filter((c) => c.verificationStatus === "verified")
+    .map((c) => c.id);
 
-  const distributed = await runDistributionAgent(ctx, contentPlan.items);
-  await logAgentAction(gameId, "publisher", "ai", "Календарь публикаций распределён по площадкам");
+  const factoryResult = await runContentFactory({
+    game: ctx,
+    gameId,
+    claimIds: verifiedClaimIds,
+    claims,
+    approvalMode: game.approvalMode,
+    verticalPublishedCount: game.verticalPublishedCount,
+  });
 
-  await runVideoProducerAgent(ctx, distributed.length);
+  await logAgentAction(
+    gameId,
+    "publisher",
+    "ai",
+    `Content map: ${factoryResult.sourceUnitCount} source → ${factoryResult.derivativeCount} адаптаций`,
+  );
+
+  await runVideoProducerAgent(ctx, factoryResult.derivativeCount);
 
   const trafficPlan = await runTrafficManagerAgent(ctx);
   await runPartnerAgent(ctx);
@@ -143,53 +150,15 @@ export async function launchGameAgents(gameId: string) {
     data: { trafficPlan: JSON.stringify(trafficPlan) },
   });
 
-  await prisma.contentItem.deleteMany({ where: { gameId } });
-
-  const landingUrl = `/l/${game.slug}`;
-  const status = initialContentStatus(game.approvalMode);
-  const verifiedClaimIds = claims
-    .filter((c) => c.verificationStatus === "verified")
-    .slice(0, 3)
-    .map((c) => c.id);
-
-  const dbItems = distributed.map((item, index) => {
-    const scheduledAt = new Date();
-    scheduledAt.setDate(scheduledAt.getDate() + item.dayOffset);
-    const [hours, minutes] = item.time.split(":");
-    scheduledAt.setHours(Number(hours), Number(minutes), 0, 0);
-
-    const fullText = `${item.topic} ${item.hook} ${item.postText}`;
-    const itemGuard = checkProductGuard(fullText);
-    const itemStatus = itemGuard.allowed ? status : "BLOCKED";
-
-    return {
-      gameId,
-      contentId: `${gameId}-C${String(index + 1).padStart(3, "0")}`,
-      platform: item.platform,
-      formatType: item.formatType,
-      topic: item.topic,
-      hook: item.hook,
-      cta: item.cta,
-      shootBrief: item.shootBrief,
-      script: item.script,
-      postText: item.postText,
-      landingUrl,
-      utm: `utm_source=${item.platform.toLowerCase()}&utm_medium=social&utm_campaign=${game.id}&utm_content=${index + 1}`,
-      claimIds: JSON.stringify(verifiedClaimIds),
-      approvalMode: game.approvalMode,
-      scheduledAt,
-      status: itemStatus,
-      blockReason: itemGuard.allowed ? null : itemGuard.reason,
-    };
+  const contentReady = await prisma.contentItem.count({
+    where: { gameId, status: { not: "BLOCKED" } },
   });
-
-  await prisma.contentItem.createMany({ data: dbItems });
 
   const report = await runAnalystAgent(ctx, {
     leads: 0,
     qualified: 0,
     paid: 0,
-    contentReady: dbItems.filter((i) => i.status !== "BLOCKED").length,
+    contentReady,
   });
 
   await prisma.campaign.update({
@@ -198,13 +167,15 @@ export async function launchGameAgents(gameId: string) {
   });
 
   await logAgentAction(gameId, "orchestrator", "ai", "Пайплайн кампании завершён", {
-    contentCount: dbItems.length,
+    contentCount: factoryResult.derivativeCount,
+    sourceUnits: factoryResult.sourceUnitCount,
+    blocked: factoryResult.blockedCount,
     claims: claims.length,
   });
 
   return {
     campaign: campaignData,
-    contentCount: dbItems.length,
+    contentCount: factoryResult.derivativeCount,
     report,
   };
 }
@@ -217,15 +188,35 @@ export async function getAgentRuns(gameId: string) {
 }
 
 export async function approveContentItem(itemId: string) {
-  const item = await prisma.contentItem.findUnique({ where: { id: itemId } });
+  const item = await prisma.contentItem.findUnique({
+    where: { id: itemId },
+    include: { game: true },
+  });
   if (!item) throw new Error("Контент не найден");
-  if (item.status === "BLOCKED") throw new Error("Контент заблокирован Product Guard");
+  if (item.status === "BLOCKED") throw new Error("Контент заблокирован QC");
 
-  const nextStatus = item.approvalMode === "A" ? "SCHEDULED" : "APPROVED";
-  return prisma.contentItem.update({
+  const verticalCount = item.game.verticalPublishedCount;
+  const needsHuman =
+    item.requiresHumanApproval ||
+    (item.isPrimaryVertical && verticalCount < 100) ||
+    item.approvalMode !== "A";
+
+  const nextStatus =
+    item.approvalMode === "A" && !needsHuman ? "SCHEDULED" : "APPROVED";
+
+  const updated = await prisma.contentItem.update({
     where: { id: itemId },
     data: { status: nextStatus, approvedAt: new Date() },
   });
+
+  if (item.isPrimaryVertical) {
+    await prisma.game.update({
+      where: { id: item.gameId },
+      data: { verticalPublishedCount: { increment: 1 } },
+    });
+  }
+
+  return updated;
 }
 
 export async function rejectContentItem(itemId: string, reason?: string) {
@@ -236,6 +227,13 @@ export async function rejectContentItem(itemId: string, reason?: string) {
 }
 
 export async function markContentPublished(itemId: string) {
+  const item = await prisma.contentItem.findUnique({ where: { id: itemId } });
+  if (!item) throw new Error("Контент не найден");
+  if (item.status === "BLOCKED") throw new Error("Нельзя публиковать заблокированный контент");
+  if (!["APPROVED", "SCHEDULED"].includes(item.status)) {
+    throw new Error("Сначала утвердите контент");
+  }
+
   return prisma.contentItem.update({
     where: { id: itemId },
     data: { status: "PUBLISHED", publishedAt: new Date() },

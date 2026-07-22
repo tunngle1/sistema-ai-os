@@ -52,6 +52,7 @@ model Game {
   approvalMode    String   @default("C")
   budget          Int?
   targetAttended  Int      @default(60)
+  verticalPublishedCount Int @default(0)
   leaderId        String
   leader          Leader   @relation(fields: [leaderId], references: [id])
   createdAt       DateTime @default(now())
@@ -63,6 +64,23 @@ model Game {
   claims          Claim[]
   analyticsEvents AnalyticsEvent[]
   auditEvents     AuditEvent[]
+  sourceUnits     ContentSourceUnit[]
+}
+
+model ContentSourceUnit {
+  id          String        @id @default(cuid())
+  gameId      String
+  game        Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  sourceId    String
+  dayOffset   Int
+  topic       String
+  coreMessage String
+  claimIds    String        @default("[]")
+  visualStyle String
+  ctaType     String
+  status      String        @default("APPROVED_SOURCE")
+  createdAt   DateTime      @default(now())
+  derivatives ContentItem[]
 }
 
 model Campaign {
@@ -102,33 +120,45 @@ model Claim {
 }
 
 model ContentItem {
-  id            String    @id @default(cuid())
-  gameId        String
-  game          Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  contentId     String?
-  platform      String
-  formatType    String    @default("post")
-  topic         String
-  hook          String
-  cta           String
-  shootBrief    String    @default("")
-  script        String    @default("")
-  postText      String    @default("")
-  landingUrl    String
-  utm           String
-  claimIds      String    @default("[]")
-  customerStage String?
-  approvalMode  String    @default("C")
-  scheduledAt   DateTime
-  status        String    @default("GENERATED")
-  blockReason   String?
-  reach         Int       @default(0)
-  views         Int       @default(0)
-  clicks        Int       @default(0)
-  ctr           Float     @default(0)
-  approvedAt    DateTime?
-  publishedAt   DateTime?
-  createdAt     DateTime  @default(now())
+  id                    String             @id @default(cuid())
+  gameId                String
+  game                  Game               @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  sourceUnitId          String?
+  sourceUnit            ContentSourceUnit? @relation(fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  contentId             String?
+  unitType              String             @default("post")
+  platform              String
+  formatType            String             @default("post")
+  topic                 String
+  hook                  String
+  cta                   String
+  ctaType               String?
+  visualStyle           String?
+  aspectRatio           String?
+  durationSec           Int?
+  isPrimaryVertical     Boolean            @default(false)
+  isCrossPublish        Boolean            @default(false)
+  shootBrief            String             @default("")
+  script                String             @default("")
+  postText              String             @default("")
+  landingUrl            String
+  utm                   String
+  claimIds              String             @default("[]")
+  customerStage         String?
+  approvalMode          String             @default("C")
+  scheduledAt           DateTime
+  status                String             @default("GENERATED")
+  blockReason           String?
+  qcResults             String             @default("{}")
+  similarityScore       Float?
+  requiresHumanApproval Boolean            @default(true)
+  reach                 Int                @default(0)
+  views                 Int                @default(0)
+  clicks                Int                @default(0)
+  ctr                   Float              @default(0)
+  approvedAt            DateTime?
+  publishedAt           DateTime?
+  createdAt             DateTime           @default(now())
 }
 
 model Lead {

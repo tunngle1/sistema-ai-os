@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { runContentAgent } from "@/lib/ai/agents/content-agent";
-import { runDistributionAgent } from "@/lib/ai/agents/distribution-agent";
+import { runContentFactory } from "@/lib/content-factory";
 import type { GameAgentContext } from "@/lib/ai/agents/types";
 
 export async function POST(
@@ -33,55 +32,31 @@ export async function POST(
       seatsTaken: game.seatsTaken,
       leaderName: game.leaderName,
       leaderBio: game.leaderBio,
+      targetAttended: game.targetAttended,
+      approvalMode: game.approvalMode,
+      budget: game.budget,
     };
 
-    const campaign = {
-      strategy: game.campaign.strategy,
-      daysLeft: game.campaign.daysLeft,
-      goalSeats: game.campaign.goalSeats,
-      accents: JSON.parse(game.campaign.accents) as string[],
-      metrics: JSON.parse(game.campaign.metrics) as string[],
-    };
+    const claims = await prisma.claim.findMany({
+      where: { campaignId: game.campaign.id },
+    });
 
-    const contentPlan = await runContentAgent(ctx, campaign);
-    const distributed = await runDistributionAgent(ctx, contentPlan.items);
-
-    await prisma.contentItem.deleteMany({ where: { gameId: id } });
-
-    const landingUrl = `/l/${game.slug}`;
-    await prisma.contentItem.createMany({
-      data: distributed.map((item, index) => {
-        const scheduledAt = new Date();
-        scheduledAt.setDate(scheduledAt.getDate() + item.dayOffset);
-        const [hours, minutes] = item.time.split(":");
-        scheduledAt.setHours(Number(hours), Number(minutes), 0, 0);
-
-        return {
-          gameId: id,
-          platform: item.platform,
-          formatType: item.formatType,
-          topic: item.topic,
-          hook: item.hook,
-          cta: item.cta,
-          shootBrief: item.shootBrief,
-          script: item.script,
-          postText: item.postText,
-          landingUrl,
-          utm: `utm_source=${item.platform.toLowerCase()}&utm_medium=social&utm_campaign=${game.id}&utm_content=${index + 1}`,
-          scheduledAt,
-          status: "HUMAN_REVIEW",
-          approvalMode: game.approvalMode,
-          contentId: `${id}-C${String(index + 1).padStart(3, "0")}`,
-        };
-      }),
+    const result = await runContentFactory({
+      game: ctx,
+      gameId: id,
+      claimIds: claims.filter((c) => c.verificationStatus === "verified").map((c) => c.id),
+      claims,
+      approvalMode: game.approvalMode,
+      verticalPublishedCount: game.verticalPublishedCount,
     });
 
     const items = await prisma.contentItem.findMany({
       where: { gameId: id },
       orderBy: { scheduledAt: "asc" },
+      include: { sourceUnit: true },
     });
 
-    return NextResponse.json({ count: items.length, items });
+    return NextResponse.json({ ...result, count: items.length, items });
   } catch (error) {
     console.error(error);
     return NextResponse.json(
